@@ -12,7 +12,7 @@ keep_alive()
 
 
 # Configuration - EDIT THESE VALUES
-BOT_TOKEN = "7517757393:AAHURLmcZu2V74ilAlnvt8ghP1R4Xdp7-p0"  # From @BotFather
+BOT_TOKEN = "7517757393:AAHGK0JMyJ7KgQDW5r7mQL-P-hkbT4R-cGE"  # From @BotFather
 GROUP_ID = -1002320071203  # Your group/channel ID (must include -100 for channels)
 
 # Set up logging
