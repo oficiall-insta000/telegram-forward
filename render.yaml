@@ -1,4 +1,3 @@
-# render.yml - Blueprint for deploying to Render
 services:
   - type: web
     name: telegram-bot-render
@@ -9,6 +8,8 @@ services:
       - key: BOT_TOKEN
         value: 7517757393:AAFmAtq_-AXE1wANhDJRtGGuGNpRA0vEaOk
       - key: GROUP_ID
-        value: -1002320071203
+        value: "-1002320071203"
     plan: free
-    port: 8080
+    # Port is now specified in the 'env' section
+    env: python
+    healthCheckPath: /
