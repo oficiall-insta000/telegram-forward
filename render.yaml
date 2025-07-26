@@ -6,7 +6,7 @@ services:
     startCommand: python main.py
     envVars:
       - key: BOT_TOKEN
-        value: 7517757393:AAHbS3Z_JrNEwsLDQ8sgvbNSh2y2UXhkg90
+        value: 7517757393:AAE4TxX-OeR7S9AjBPqCwvAa8cArVs4CbWE
       - key: GROUP_ID
         value: "-1002320071203"
     plan: free
