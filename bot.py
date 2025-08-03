@@ -89,7 +89,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.edit_message_text("⚠️ لا توجد رسالة محفوظة.")
 
-def run_bot():
+async def run_bot():
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("addtarget", add_target_command))
@@ -98,4 +98,5 @@ def run_bot():
     app.add_handler(MessageHandler(filters.ALL, handle_message))
 
     print("✅ Bot is running...")
-    asyncio.run(app.run_polling())
+    await app.run_polling()
+
