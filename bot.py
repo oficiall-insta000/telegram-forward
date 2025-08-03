@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from target_manager import add_target, get_all_targets
-
+import asyncio
 load_dotenv()
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -98,4 +98,4 @@ def run_bot():
     app.add_handler(MessageHandler(filters.ALL, handle_message))
 
     print("✅ Bot is running...")
-    app.run_polling()
+    asyncio.run(app.run_polling())
