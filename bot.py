@@ -1,102 +1,115 @@
 import os
-from dotenv import load_dotenv
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram.ext import (
+    ApplicationBuilder,
+    ContextTypes,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters,
+)
 from target_manager import add_target, get_all_targets
-import asyncio
-load_dotenv()
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = os.getenv("ADMIN_ID")
 
-SEND_AUTOMATICALLY = True
-last_forwarded = None
+# الإعدادات
+ADMIN_ONLY = True  # البوت يعمل فقط لأوامر الأدمن
+AUTO_SEND = False  # الوضع الافتراضي: لا يتم الإرسال التلقائي إلا بعد ضغط زر
 
-def get_mode_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📤 إرسال تلقائي", callback_data="set_auto")],
-        [InlineKeyboardButton("🕹️ إرسال يدوي", callback_data="set_manual")]
-    ])
+# إعدادات السجلات
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-def get_send_button():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📤 إرسال", callback_data="send_now")]
-    ])
 
+# إضافة هدف جديد
 async def add_target_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    chat = update.effective_chat
-    if user_id == ADMIN_ID:
-        if add_target(chat.id):
-            await update.message.reply_text("✅ تم إضافة الوجهة بنجاح.")
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+
+    if not context.args:
+        await update.message.reply_text("❌ يجب تحديد آي دي الجروب أو القناة.")
+        return
+
+    try:
+        target_id = int(context.args[0])
+        added = add_target(target_id)
+        if added:
+            await update.message.reply_text(f"✅ تم إضافة الهدف: `{target_id}`", parse_mode="Markdown")
         else:
-            await update.message.reply_text("ℹ️ الوجهة مضافة مسبقًا.")
-    else:
-        await update.message.reply_text("🚫 ليس لديك صلاحية تنفيذ هذا الأمر.")
+            await update.message.reply_text(f"ℹ️ الهدف موجود مسبقًا.")
+    except ValueError:
+        await update.message.reply_text("❌ آي دي غير صالح.")
 
+
+# تغيير وضع الإرسال التلقائي / اليدوي
 async def mode_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id == ADMIN_ID:
-        await update.message.reply_text("اختر طريقة الإرسال:", reply_markup=get_mode_keyboard())
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global last_forwarded, SEND_AUTOMATICALLY
-
-    if update.effective_user.id != ADMIN_ID:
+    if str(update.effective_user.id) != ADMIN_ID:
         return
 
-    msg = update.message
-    if not msg:
-        return
+    global AUTO_SEND
+    AUTO_SEND = not AUTO_SEND
+    status = "تلقائي ✅" if AUTO_SEND else "يدوي ⏳"
+    await update.message.reply_text(f"🔁 وضع الإرسال الحالي: {status}")
 
-    last_forwarded = msg
 
-    if SEND_AUTOMATICALLY:
-        await forward_clean(msg, context)
-    else:
-        await msg.reply_text("اضغط لإرسال الرسالة إلى الوجهات:", reply_markup=get_send_button())
-
-async def forward_clean(msg, context):
-    targets = get_all_targets()
-    for target_id in targets:
-        try:
-            if msg.text:
-                await context.bot.send_message(chat_id=target_id, text=msg.text)
-            elif msg.photo:
-                await context.bot.send_photo(chat_id=target_id, photo=msg.photo[-1].file_id, caption=msg.caption)
-            elif msg.video:
-                await context.bot.send_video(chat_id=target_id, video=msg.video.file_id, caption=msg.caption)
-            elif msg.document:
-                await context.bot.send_document(chat_id=target_id, document=msg.document.file_id, caption=msg.caption)
-        except Exception as e:
-            print(f"❌ Failed to send to {target_id}: {e}")
-
+# زر الإرسال اليدوي
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global SEND_AUTOMATICALLY, last_forwarded
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+
     query = update.callback_query
     await query.answer()
 
-    if query.data == "set_auto":
-        SEND_AUTOMATICALLY = True
-        await query.edit_message_text("✅ تم تفعيل الإرسال التلقائي.")
-    elif query.data == "set_manual":
-        SEND_AUTOMATICALLY = False
-        await query.edit_message_text("🕹️ تم تفعيل الإرسال اليدوي.")
-    elif query.data == "send_now":
-        if last_forwarded:
-            await forward_clean(last_forwarded, context)
-            await query.edit_message_text("📤 تم إرسال الرسالة بنجاح.")
+    if query.data == "send_now":
+        if "last_message" in context.user_data:
+            msg = context.user_data["last_message"]
+            for target_id in get_all_targets():
+                try:
+                    await context.bot.copy_message(
+                        chat_id=target_id,
+                        from_chat_id=msg.chat_id,
+                        message_id=msg.message_id,
+                    )
+                except Exception as e:
+                    logger.error(f"❌ فشل الإرسال إلى {target_id}: {e}")
+            await query.edit_message_text("✅ تم الإرسال بنجاح.")
         else:
-            await query.edit_message_text("⚠️ لا توجد رسالة محفوظة.")
+            await query.edit_message_text("❌ لا يوجد رسالة محفوظة.")
 
+
+# التعامل مع كل الرسائل
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+
+    context.user_data["last_message"] = update.message
+
+    if AUTO_SEND:
+        for target_id in get_all_targets():
+            try:
+                await context.bot.copy_message(
+                    chat_id=target_id,
+                    from_chat_id=update.message.chat_id,
+                    message_id=update.message.message_id,
+                )
+            except Exception as e:
+                logger.error(f"❌ فشل الإرسال إلى {target_id}: {e}")
+    else:
+        keyboard = [[InlineKeyboardButton("📤 إرسال", callback_data="send_now")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text("📝 هل تريد إرسال هذه الرسالة؟", reply_markup=reply_markup)
+
+
+# تشغيل البوت
 async def run_bot():
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("addtarget", add_target_command))
     app.add_handler(CommandHandler("mode", mode_command))
     app.add_handler(CallbackQueryHandler(handle_buttons))
     app.add_handler(MessageHandler(filters.ALL, handle_message))
 
-    print("✅ Bot is running...")
+    logger.info("🤖 Bot is running...")
     await app.run_polling()
-
