@@ -7,9 +7,8 @@ services:
     envVars:
       - key: BOT_TOKEN
         value: 7517757393:AAGzb34ezDqZUuUO2mZeMSJfsOAbXr70Oa4
-      - key: GROUP_ID
-        value: "-1002320071203"
+      - key: ADMIN_ID
+        value: "5081207021"
     plan: free
-    # Port is now specified in the 'env' section
     env: python
     healthCheckPath: /
