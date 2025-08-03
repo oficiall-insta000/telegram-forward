@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from target_manager import add_target, get_all_targets
 
 load_dotenv()
@@ -9,8 +9,8 @@ load_dotenv()
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
 
-# حالة الإرسال التلقائي أو اليدوي
 SEND_AUTOMATICALLY = True
+last_forwarded = None
 
 def get_mode_keyboard():
     return InlineKeyboardMarkup([
@@ -23,7 +23,6 @@ def get_send_button():
         [InlineKeyboardButton("📤 إرسال", callback_data="send_now")]
     ])
 
-# أمر /addtarget لإضافة الجروب أو القناة الحالية
 async def add_target_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat = update.effective_chat
@@ -35,14 +34,10 @@ async def add_target_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         await update.message.reply_text("🚫 ليس لديك صلاحية تنفيذ هذا الأمر.")
 
-# أمر /mode لاختيار طريقة الإرسال
 async def mode_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id == ADMIN_ID:
         await update.message.reply_text("اختر طريقة الإرسال:", reply_markup=get_mode_keyboard())
-
-# الرسائل المعاد توجيهها
-last_forwarded = None
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global last_forwarded, SEND_AUTOMATICALLY
@@ -54,7 +49,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg:
         return
 
-    # حفظ آخر رسالة
     last_forwarded = msg
 
     if SEND_AUTOMATICALLY:
@@ -62,7 +56,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await msg.reply_text("اضغط لإرسال الرسالة إلى الوجهات:", reply_markup=get_send_button())
 
-# إعادة إرسال المحتوى بدون اسم المرسل
 async def forward_clean(msg, context):
     targets = get_all_targets()
     for target_id in targets:
@@ -78,7 +71,6 @@ async def forward_clean(msg, context):
         except Exception as e:
             print(f"❌ Failed to send to {target_id}: {e}")
 
-# التعامل مع الأزرار
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global SEND_AUTOMATICALLY, last_forwarded
     query = update.callback_query
@@ -97,9 +89,8 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.edit_message_text("⚠️ لا توجد رسالة محفوظة.")
 
-# تشغيل البوت
 def run_bot():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("addtarget", add_target_command))
     app.add_handler(CommandHandler("mode", mode_command))
