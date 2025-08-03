@@ -1,7 +1,12 @@
+import asyncio
 from keep_alive import keep_alive
 from bot import run_bot
-import asyncio
 
 if __name__ == "__main__":
     keep_alive()
-    asyncio.run(run_bot())
+    try:
+        asyncio.run(run_bot())
+    except RuntimeError:
+        import nest_asyncio
+        nest_asyncio.apply()
+        asyncio.get_event_loop().run_until_complete(run_bot())
