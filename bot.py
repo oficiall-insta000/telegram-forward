@@ -1,9 +1,8 @@
 import os
 import logging
-import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder,
+    Application,
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
@@ -133,42 +132,28 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ حدث خطأ أثناء معالجة طلبك.")
 
 async def run_bot():
-    try:
-        if not BOT_TOKEN or not ADMIN_ID:
-            raise ValueError("BOT_TOKEN and ADMIN_ID must be set in environment variables")
+    """Run the bot."""
+    if not BOT_TOKEN or not ADMIN_ID:
+        raise ValueError("BOT_TOKEN and ADMIN_ID must be set in environment variables")
 
-        # Create and configure application
-        application = ApplicationBuilder().token(BOT_TOKEN).build()
+    # Create the Application
+    application = Application.builder().token(BOT_TOKEN).build()
 
-        # Add handlers
-        application.add_handler(CommandHandler("addtarget", add_target_command))
-        application.add_handler(CommandHandler("mode", mode_command))
-        application.add_handler(CallbackQueryHandler(handle_buttons))
-        application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
-        application.add_error_handler(error_handler)
+    # Add handlers
+    application.add_handler(CommandHandler("addtarget", add_target_command))
+    application.add_handler(CommandHandler("mode", mode_command))
+    application.add_handler(CallbackQueryHandler(handle_buttons))
+    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
+    application.add_error_handler(error_handler)
 
-        logger.info("🤖 Bot is starting...")
-        
-        # Start polling
-        await application.initialize()
-        await application.start()
-        await application.updater.start_polling()
-        
-        logger.info("🤖 Bot is now running!")
-        
-        # Keep the application running
-        while True:
-            await asyncio.sleep(3600)
-            
-    except Exception as e:
-        logger.error(f"Fatal error: {e}")
-    finally:
-        logger.info("🤖 Bot is shutting down...")
-        if 'application' in locals():
-            await application.updater.stop()
-            await application.stop()
-            await application.shutdown()
+    logger.info("🤖 Bot is starting...")
+    await application.initialize()
+    await application.start()
+    logger.info("🤖 Bot is now running!")
 
-def main():
-    """Entry point for the bot"""
-    asyncio.run(run_bot())
+    # Run the bot until you press Ctrl-C
+    await application.run_polling()
+
+    logger.info("🤖 Bot is shutting down...")
+    await application.stop()
+    await application.shutdown()
