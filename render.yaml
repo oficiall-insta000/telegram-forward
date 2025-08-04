@@ -9,4 +9,5 @@ services:
       - key: BOT_TOKEN
         value: 7517757393:AAGzb34ezDqZUuUO2mZeMSJfsOAbXr70Oa4
       - key: ADMIN_ID
-        value: "5081207021"     # تأكد أن الرقم مكتوب كنص بين علامات اقتباس
+        value: "5081207021"
+    healthCheckPath: /
