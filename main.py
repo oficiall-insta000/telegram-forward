@@ -1,6 +1,6 @@
 import os
 import json
-from keep_alive import keep_alive
+
 from dotenv import load_dotenv
 from telegram import (InputMediaPhoto, InputMediaVideo, 
                      InputMediaDocument, InputMediaAudio)
