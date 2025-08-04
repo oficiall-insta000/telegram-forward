@@ -131,7 +131,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     if update and hasattr(update, 'message'):
         await update.message.reply_text("❌ حدث خطأ أثناء معالجة طلبك.")
 
-async def run_bot():
+def main():
     """Run the bot."""
     if not BOT_TOKEN or not ADMIN_ID:
         raise ValueError("BOT_TOKEN and ADMIN_ID must be set in environment variables")
@@ -147,13 +147,4 @@ async def run_bot():
     application.add_error_handler(error_handler)
 
     logger.info("🤖 Bot is starting...")
-    await application.initialize()
-    await application.start()
-    logger.info("🤖 Bot is now running!")
-
-    # Run the bot until you press Ctrl-C
-    await application.run_polling()
-
-    logger.info("🤖 Bot is shutting down...")
-    await application.stop()
-    await application.shutdown()
+    application.run_polling()
