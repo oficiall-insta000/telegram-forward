@@ -2,7 +2,9 @@ import os
 import json
 from keep_alive import keep_alive
 from dotenv import load_dotenv
-from telegram import Bot, Update, InputMediaPhoto, InputMediaVideo, InputMediaDocument, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import (InputMediaPhoto, InputMediaVideo, 
+                     InputMediaDocument, InputMediaAudio)
+from telegram import Bot, Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -58,28 +60,25 @@ async def send_to_targets(application, message=None, chat_id=None, media_group=N
         try:
             if media_group:
                 media = []
-                for idx, media_item in enumerate(media_group):
+                for media_item in media_group:
                     if media_item.photo:
-                        if idx == 0:
-                            media.append(InputMediaPhoto(media_item.photo[-1].file_id, caption=message))
-                        else:
-                            media.append(InputMediaPhoto(media_item.photo[-1].file_id))
+                        media.append(InputMediaPhoto(media_item.photo[-1].file_id, 
+                                  caption=message if len(media) == 0 else None))
                     elif media_item.video:
-                        if idx == 0:
-                            media.append(InputMediaVideo(media_item.video.file_id, caption=message))
-                        else:
-                            media.append(InputMediaVideo(media_item.video.file_id))
+                        media.append(InputMediaVideo(media_item.video.file_id,
+                                  caption=message if len(media) == 0 else None))
                     elif media_item.document:
-                        if idx == 0:
-                            media.append(InputMediaDocument(media_item.document.file_id, caption=message))
-                        else:
-                            media.append(InputMediaDocument(media_item.document.file_id))
-                
+                        media.append(InputMediaDocument(media_item.document.file_id,
+                                  caption=message if len(media) == 0 else None))
                 await bot.send_media_group(chat_id=target, media=media)
-            elif message:
+            
+            elif message and (chat_id is None):
                 await bot.send_message(chat_id=target, text=message)
+            
             elif chat_id:
-                await bot.copy_message(chat_id=target, from_chat_id=chat_id, message_id=message.message_id)
+                await bot.copy_message(chat_id=target, 
+                                     from_chat_id=chat_id, 
+                                     message_id=message.message_id)
         except Exception as e:
             print(f"Error sending to {target}: {e}")
 
@@ -170,85 +169,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = load_data()
     message = update.message
     
-    if data['mode'] == 'auto':
-        if message.media_group_id:
-            media_group = await message.get_media_group()
-            await send_to_targets(context.application, message.caption, media_group=media_group)
-        elif message.text:
-            await send_to_targets(context.application, message.text)
-        else:
-            await send_to_targets(context.application, None, chat_id=message.chat_id, message=message)
-    else:
-        keyboard = [[InlineKeyboardButton("📤 إرسال", callback_data='send_message')]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        context.user_data['pending_message'] = {
-            'chat_id': message.chat_id,
-            'message': message
-        }
-        
-        if message.media_group_id:
-            media_group = await message.get_media_group()
-            context.user_data['pending_message']['media_group'] = media_group
-            context.user_data['pending_message']['message'] = message.caption
-            
-            first_media = media_group[0]
-            if first_media.photo:
-                await context.bot.send_photo(
-                    chat_id=ADMIN_ID,
-                    photo=first_media.photo[-1].file_id,
-                    caption=f"{message.caption}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
-                    reply_markup=reply_markup
-                )
-            elif first_media.video:
-                await context.bot.send_video(
-                    chat_id=ADMIN_ID,
-                    video=first_media.video.file_id,
-                    caption=f"{message.caption}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
-                    reply_markup=reply_markup
-                )
-            elif first_media.document:
-                await context.bot.send_document(
-                    chat_id=ADMIN_ID,
-                    document=first_media.document.file_id,
-                    caption=f"{message.caption}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
-                    reply_markup=reply_markup
-                )
-        elif message.text:
-            await context.bot.send_message(
-                chat_id=ADMIN_ID,
-                text=f"{message.text}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
-                reply_markup=reply_markup
-            )
-        else:
-            if message.photo:
-                await context.bot.send_photo(
-                    chat_id=ADMIN_ID,
-                    photo=message.photo[-1].file_id,
-                    caption=f"{message.caption}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
-                    reply_markup=reply_markup
-                )
+    try:
+        if data['mode'] == 'auto':
+            # معالجة الوسائط المتعددة
+            if message.media_group_id:
+                media_group = await message.get_media_group()
+                await send_to_targets(context.application, message.caption, media_group=media_group)
+            elif message.photo:
+                await send_to_targets(context.application, message.caption, chat_id=message.chat_id, message=message)
             elif message.video:
-                await context.bot.send_video(
-                    chat_id=ADMIN_ID,
-                    video=message.video.file_id,
-                    caption=f"{message.caption}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
-                    reply_markup=reply_markup
-                )
+                await send_to_targets(context.application, message.caption, chat_id=message.chat_id, message=message)
             elif message.document:
-                await context.bot.send_document(
-                    chat_id=ADMIN_ID,
-                    document=message.document.file_id,
-                    caption=f"{message.caption}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
-                    reply_markup=reply_markup
-                )
+                await send_to_targets(context.application, message.caption, chat_id=message.chat_id, message=message)
             elif message.audio:
-                await context.bot.send_audio(
-                    chat_id=ADMIN_ID,
-                    audio=message.audio.file_id,
-                    caption=f"{message.caption}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
-                    reply_markup=reply_markup
-                )
+                await send_to_targets(context.application, message.caption, chat_id=message.chat_id, message=message)
+            elif message.text:
+                await send_to_targets(context.application, message.text)
+        else:
+            # الكود الخاص بالوضع اليدوي...
+    except Exception as e:
+        print(f"Error handling message: {e}")
 
 app = Flask(__name__)
 
