@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import time
 from threading import Thread
 from flask import Flask
 import requests
@@ -21,7 +22,7 @@ from telegram.ext import (
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 ADMIN_ID = int(os.getenv('ADMIN_ID', 0))
 DATA_FILE = 'data.json'
-RENDER_URL = "https://your-render-service.onrender.com"  # Replace with your actual URL
+RENDER_URL = os.getenv('RENDER_URL', "https://your-render-service.onrender.com")
 
 # ======================
 # FLASK KEEP-ALIVE
@@ -70,16 +71,21 @@ async def send_to_targets(context: ContextTypes.DEFAULT_TYPE, **kwargs):
             if 'media_group' in kwargs:
                 media = []
                 for idx, item in enumerate(kwargs['media_group']):
-                    media.append(
-                        InputMediaPhoto(item.photo[-1].file_id, 
-                        caption=kwargs.get('caption') if idx == 0 else None
-                    ) if item.photo else (
-                        InputMediaVideo(item.video.file_id,
-                        caption=kwargs.get('caption') if idx == 0 else None
-                    ) if item.video else (
-                        InputMediaDocument(item.document.file_id,
-                        caption=kwargs.get('caption') if idx == 0 else None
-                    )
+                    if item.photo:
+                        media.append(InputMediaPhoto(
+                            item.photo[-1].file_id,
+                            caption=kwargs.get('caption') if idx == 0 else None
+                        ))
+                    elif item.video:
+                        media.append(InputMediaVideo(
+                            item.video.file_id,
+                            caption=kwargs.get('caption') if idx == 0 else None
+                        ))
+                    elif item.document:
+                        media.append(InputMediaDocument(
+                            item.document.file_id,
+                            caption=kwargs.get('caption') if idx == 0 else None
+                        ))
                 await context.bot.send_media_group(target, media=media)
             elif 'message_obj' in kwargs:
                 await context.bot.copy_message(
@@ -96,7 +102,8 @@ async def send_to_targets(context: ContextTypes.DEFAULT_TYPE, **kwargs):
 # COMMAND HANDLERS
 # ======================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update): return
+    if not is_admin(update):
+        return
     
     data = load_data()
     await update.message.reply_text(
@@ -111,7 +118,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def change_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update): return
+    if not is_admin(update):
+        return
     
     await update.message.reply_text(
         "Select mode:",
@@ -122,7 +130,8 @@ async def change_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def add_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update): return
+    if not is_admin(update):
+        return
     
     if not context.args:
         await update.message.reply_text("Usage: /addtarget @channel")
@@ -139,7 +148,8 @@ async def add_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"⚠️ {target} already exists")
 
 async def list_targets(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update): return
+    if not is_admin(update):
+        return
     
     data = load_data()
     await update.message.reply_text(
@@ -150,7 +160,8 @@ async def list_targets(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # MESSAGE HANDLING
 # ======================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update): return
+    if not is_admin(update):
+        return
     
     data = load_data()
     msg = update.message
@@ -209,7 +220,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    if not is_admin(update): return
+    if not is_admin(update):
+        return
     
     if query.data.startswith('mode_'):
         data = load_data()
@@ -234,9 +246,15 @@ def run_flask():
     app.run(host='0.0.0.0', port=8080)
 
 def main():
-    # Start keep-alive
-    Thread(target=ping_server).start()
-    Thread(target=run_flask).start()
+    # Configure logging
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.INFO
+    )
+    
+    # Start keep-alive services
+    Thread(target=ping_server, daemon=True).start()
+    Thread(target=run_flask, daemon=True).start()
     
     # Configure bot
     application = Application.builder().token(TOKEN).build()
@@ -258,8 +276,4 @@ def main():
     application.run_polling()
 
 if __name__ == '__main__':
-    logging.basicConfig(
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        level=logging.INFO
-    )
     main()
