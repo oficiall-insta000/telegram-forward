@@ -11,6 +11,10 @@ from telegram.ext import (
     CallbackQueryHandler,
     ContextTypes
 )
+from flask import Flask
+from threading import Thread
+import requests
+import time
 
 # Load environment variables
 load_dotenv()
@@ -246,6 +250,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=reply_markup
                 )
 
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is alive!"
+
+def ping():
+    while True:
+        requests.get("https://telegram-forward-wa4p.onrender.com")
+        time.sleep(300)  # Ping كل 5 دقائق
+
+Thread(target=ping).start()
+
 def main():
     # Initialize data file if not exists
     load_data()
@@ -265,5 +282,5 @@ def main():
     application.run_polling()
 
 if __name__ == '__main__':
-    keep_alive()
+    app.run(host='0.0.0.0', port=8080)
     main()
