@@ -1,39 +1,52 @@
 import os
 import json
-
-from dotenv import load_dotenv
-from telegram import (InputMediaPhoto, InputMediaVideo, 
-                     InputMediaDocument, InputMediaAudio)
-from telegram import Bot, Update, InlineKeyboardMarkup, InlineKeyboardButton
+import logging
+from threading import Thread
+from flask import Flask
+import requests
+from telegram import (
+    Bot, Update,
+    InputMediaPhoto, InputMediaVideo, InputMediaDocument,
+    InlineKeyboardMarkup, InlineKeyboardButton
+)
 from telegram.ext import (
     Application,
-    CommandHandler,
-    MessageHandler,
-    filters,
-    CallbackQueryHandler,
-    ContextTypes
+    CommandHandler, MessageHandler, CallbackQueryHandler,
+    filters, ContextTypes
 )
-from flask import Flask
-from threading import Thread
-import requests
-import time
 
-# Load environment variables
-load_dotenv()
-
-# Configuration
+# ======================
+# CONFIGURATION
+# ======================
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-ADMIN_ID = int(os.getenv('ADMIN_ID', '0'))  # Default to 0 if not set
+ADMIN_ID = int(os.getenv('ADMIN_ID', 0))
 DATA_FILE = 'data.json'
+RENDER_URL = "https://your-render-service.onrender.com"  # Replace with your actual URL
 
-# Initialize data structure
+# ======================
+# FLASK KEEP-ALIVE
+# ======================
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "🤖 Bot is alive and running!"
+
+def ping_server():
+    while True:
+        try:
+            requests.get(RENDER_URL, timeout=10)
+            logging.info("Keep-alive ping successful")
+        except Exception as e:
+            logging.error(f"Ping failed: {e}")
+        time.sleep(300)  # Ping every 5 minutes
+
+# ======================
+# BOT CORE FUNCTIONS
+# ======================
 def init_data():
-    return {
-        'targets': [],
-        'mode': 'auto'  # or 'manual'
-    }
+    return {'targets': [], 'mode': 'auto'}
 
-# Load data from JSON file
 def load_data():
     try:
         with open(DATA_FILE, 'r') as f:
@@ -43,256 +56,210 @@ def load_data():
         save_data(data)
         return data
 
-# Save data to JSON file
 def save_data(data):
     with open(DATA_FILE, 'w') as f:
         json.dump(data, f, indent=2)
 
-# Check if user is admin
 def is_admin(update: Update):
     return update.effective_user.id == ADMIN_ID
 
-async def send_to_targets(application, message=None, chat_id=None, media_group=None):
+async def send_to_targets(context: ContextTypes.DEFAULT_TYPE, **kwargs):
     data = load_data()
-    bot = application.bot
-    
     for target in data['targets']:
         try:
-            if media_group:
+            if 'media_group' in kwargs:
                 media = []
-                for media_item in media_group:
-                    if media_item.photo:
-                        media.append(InputMediaPhoto(media_item.photo[-1].file_id, 
-                                  caption=message if len(media) == 0 else None))
-                    elif media_item.video:
-                        media.append(InputMediaVideo(media_item.video.file_id,
-                                  caption=message if len(media) == 0 else None))
-                    elif media_item.document:
-                        media.append(InputMediaDocument(media_item.document.file_id,
-                                  caption=message if len(media) == 0 else None))
-                await bot.send_media_group(chat_id=target, media=media)
-            
-            elif message and (chat_id is None):
-                await bot.send_message(chat_id=target, text=message)
-            
-            elif chat_id:
-                await bot.copy_message(chat_id=target, 
-                                     from_chat_id=chat_id, 
-                                     message_id=message.message_id)
+                for idx, item in enumerate(kwargs['media_group']):
+                    media.append(
+                        InputMediaPhoto(item.photo[-1].file_id, 
+                        caption=kwargs.get('caption') if idx == 0 else None
+                    ) if item.photo else (
+                        InputMediaVideo(item.video.file_id,
+                        caption=kwargs.get('caption') if idx == 0 else None
+                    ) if item.video else (
+                        InputMediaDocument(item.document.file_id,
+                        caption=kwargs.get('caption') if idx == 0 else None
+                    )
+                await context.bot.send_media_group(target, media=media)
+            elif 'message_obj' in kwargs:
+                await context.bot.copy_message(
+                    chat_id=target,
+                    from_chat_id=kwargs['chat_id'],
+                    message_id=kwargs['message_obj'].message_id
+                )
+            else:
+                await context.bot.send_message(target, text=kwargs['text'])
         except Exception as e:
-            print(f"Error sending to {target}: {e}")
+            logging.error(f"Failed to send to {target}: {e}")
 
+# ======================
+# COMMAND HANDLERS
+# ======================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update):
-        return
+    if not is_admin(update): return
     
+    data = load_data()
     await update.message.reply_text(
-        "مرحباً بك في بوت التوجيه!\n"
-        "استخدم /mode لتغيير وضع الإرسال (تلقائي/يدوي)\n"
-        "استخدم /addtarget لإضافة قناة أو مجموعة\n"
-        "استخدم /targets لعرض قائمة الأهداف"
+        f"⚙️ Bot Status:\n"
+        f"- Mode: {'AUTO' if data['mode'] == 'auto' else 'MANUAL'}\n"
+        f"- Targets: {len(data['targets'])}\n"
+        f"- Uptime Monitor: {RENDER_URL}\n\n"
+        "📋 Commands:\n"
+        "/mode - Switch mode\n"
+        "/addtarget @channel - Add target\n"
+        "/targets - List targets"
     )
 
 async def change_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update):
-        return
-    
-    data = load_data()
-    keyboard = [
-        [
-            InlineKeyboardButton("تلقائي", callback_data='mode_auto'),
-            InlineKeyboardButton("يدوي", callback_data='mode_manual'),
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    if not is_admin(update): return
     
     await update.message.reply_text(
-        f"وضع الإرسال الحالي: {data['mode']}\nاختر الوضع الجديد:",
-        reply_markup=reply_markup
+        "Select mode:",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("AUTO", callback_data='mode_auto'),
+            InlineKeyboardButton("MANUAL", callback_data='mode_manual')
+        ]])
     )
 
 async def add_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update):
-        return
+    if not is_admin(update): return
     
     if not context.args:
-        await update.message.reply_text("الرجاء إدخال معرف القناة أو المجموعة بعد الأمر /addtarget")
+        await update.message.reply_text("Usage: /addtarget @channel")
         return
     
-    target = context.args[0]
+    target = context.args[0].lstrip('@')
     data = load_data()
     
     if target not in data['targets']:
         data['targets'].append(target)
         save_data(data)
-        await update.message.reply_text(f"تمت إضافة {target} إلى قائمة الأهداف")
+        await update.message.reply_text(f"✅ Added {target}")
     else:
-        await update.message.reply_text(f"{target} موجود بالفعل في قائمة الأهداف")
+        await update.message.reply_text(f"⚠️ {target} already exists")
 
 async def list_targets(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update):
-        return
+    if not is_admin(update): return
     
     data = load_data()
-    if not data['targets']:
-        await update.message.reply_text("لا توجد أهداف محددة بعد")
-    else:
-        targets_list = "\n".join(data['targets'])
-        await update.message.reply_text(f"قائمة الأهداف:\n{targets_list}")
+    await update.message.reply_text(
+        "📌 Targets:\n" + "\n".join(f"• {t}" for t in data['targets']) if data['targets'] else "No targets yet"
+    )
 
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ======================
+# MESSAGE HANDLING
+# ======================
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update): return
+    
+    data = load_data()
+    msg = update.message
+    
+    try:
+        if data['mode'] == 'auto':
+            if msg.media_group_id:
+                await send_to_targets(
+                    context,
+                    media_group=await msg.get_media_group(),
+                    caption=msg.caption
+                )
+            else:
+                await send_to_targets(
+                    context,
+                    chat_id=msg.chat_id,
+                    message_obj=msg,
+                    text=msg.text or msg.caption
+                )
+        else:
+            context.user_data['pending'] = {
+                'chat_id': msg.chat_id,
+                'message': msg
+            }
+            
+            if msg.media_group_id:
+                context.user_data['pending']['media_group'] = await msg.get_media_group()
+                preview = context.user_data['pending']['media_group'][0]
+                caption = f"📦 Media Group\n{msg.caption or ''}\n\nSend to {len(data['targets'])} targets?"
+            else:
+                preview = msg
+                caption = f"{msg.text or msg.caption or 'Media'}\n\nSend to {len(data['targets'])} targets?"
+            
+            if msg.photo:
+                await context.bot.send_photo(
+                    ADMIN_ID, preview.photo[-1].file_id,
+                    caption=caption,
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("📤 SEND", callback_data='confirm_send')
+                    ]])
+                )
+            elif msg.text:
+                await context.bot.send_message(
+                    ADMIN_ID, caption,
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("📤 SEND", callback_data='confirm_send')
+                    ]])
+                )
+    except Exception as e:
+        logging.error(f"Handle message error: {e}")
+
+# ======================
+# BUTTON HANDLERS
+# ======================
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    if not is_admin(update):
-        return
-    
-    data = load_data()
+    if not is_admin(update): return
     
     if query.data.startswith('mode_'):
-        new_mode = query.data.split('_')[1]
-        data['mode'] = new_mode
+        data = load_data()
+        data['mode'] = query.data.split('_')[1]
         save_data(data)
-        await query.edit_message_text(f"تم تغيير وضع الإرسال إلى: {new_mode}")
-    
-    elif query.data == 'send_message':
-        message_data = context.user_data.get('pending_message')
-        if message_data:
-            await send_to_targets(context.application, **message_data)
-            await query.edit_message_text("تم إرسال الرسالة إلى جميع الأهداف")
-            del context.user_data['pending_message']
+        await query.edit_message_text(f"Mode set to {data['mode'].upper()}")
+    elif query.data == 'confirm_send':
+        pending = context.user_data.get('pending')
+        if pending:
+            try:
+                await send_to_targets(context, **pending)
+                await query.edit_message_text("✅ Sent successfully")
+            except Exception as e:
+                await query.edit_message_text(f"❌ Failed: {e}")
+            finally:
+                context.user_data.pop('pending', None)
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update):
-        return
-    
-    data = load_data()
-    message = update.message
-    
-    try:
-      if data['mode'] == 'auto':
-          if message.media_group_id:
-              media_group = await message.get_media_group()
-              await send_to_targets(context.application, message.caption, media_group=media_group)
-          elif message.photo:
-              await send_to_targets(context.application, message.caption, chat_id=message.chat_id, message=message)
-          elif message.video:
-              await send_to_targets(context.application, message.caption, chat_id=message.chat_id, message=message)
-          elif message.document:
-              await send_to_targets(context.application, message.caption, chat_id=message.chat_id, message=message)
-          elif message.audio:
-              await send_to_targets(context.application, message.caption, chat_id=message.chat_id, message=message)
-          elif message.text:
-              await send_to_targets(context.application, message.text)
-      else:
-        # الوضع اليدوي - عرض زر التأكيد
-        keyboard = [[InlineKeyboardButton("📤 إرسال", callback_data='send_message')]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        # حفظ الرسالة مؤقتاً للإرسال لاحقاً
-        context.user_data['pending_message'] = {
-            'chat_id': message.chat_id,
-            'message': message
-        }
-        
-        # معالجة أنواع الوسائط المختلفة
-        if message.media_group_id:
-            media_group = await message.get_media_group()
-            context.user_data['pending_message']['media_group'] = media_group
-            context.user_data['pending_message']['message'] = message.caption
-            
-            # عرض معاينة للوسائط المتعددة
-            first_media = media_group[0]
-            if first_media.photo:
-                await context.bot.send_photo(
-                    chat_id=ADMIN_ID,
-                    photo=first_media.photo[-1].file_id,
-                    caption=f"{message.caption}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
-                    reply_markup=reply_markup
-                )
-            elif first_media.video:
-                await context.bot.send_video(
-                    chat_id=ADMIN_ID,
-                    video=first_media.video.file_id,
-                    caption=f"{message.caption}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
-                    reply_markup=reply_markup
-                )
-            elif first_media.document:
-                await context.bot.send_document(
-                    chat_id=ADMIN_ID,
-                    document=first_media.document.file_id,
-                    caption=f"{message.caption}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
-                    reply_markup=reply_markup
-                )
-        
-        elif message.photo:
-            await context.bot.send_photo(
-                chat_id=ADMIN_ID,
-                photo=message.photo[-1].file_id,
-                caption=f"{message.caption}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
-                reply_markup=reply_markup
-            )
-        
-        elif message.video:
-            await context.bot.send_video(
-                chat_id=ADMIN_ID,
-                video=message.video.file_id,
-                caption=f"{message.caption}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
-                reply_markup=reply_markup
-            )
-        
-        elif message.document:
-            await context.bot.send_document(
-                chat_id=ADMIN_ID,
-                document=message.document.file_id,
-                caption=f"{message.caption}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
-                reply_markup=reply_markup
-            )
-        
-        elif message.text:
-            await context.bot.send_message(
-                chat_id=ADMIN_ID,
-                text=f"{message.text}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
-                reply_markup=reply_markup)
-            
-              pass
-            
-    except Exception as e:
-        print(f"Error handling message: {e}")
-app = Flask(__name__)
+# ======================
+# APPLICATION SETUP
+# ======================
+def run_flask():
+    app.run(host='0.0.0.0', port=8080)
 
-@app.route('/')
-def home():
-    return "Bot is alive!"
-
-def ping():
-    while True:
-        try:
-            requests.get("https://telegram-forward-wa4p.onrender.com")
-            time.sleep(300)  # كل 5 دقائق
-        except Exception as e:
-            print(f"Ping error: {e}")
-
-# بدء الخيط في الخلفية
-Thread(target=ping).start()
 def main():
-    # Initialize data file if not exists
-    load_data()
+    # Start keep-alive
+    Thread(target=ping_server).start()
+    Thread(target=run_flask).start()
     
-    # Create application
+    # Configure bot
     application = Application.builder().token(TOKEN).build()
     
     # Add handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("mode", change_mode))
-    application.add_handler(CommandHandler("addtarget", add_target))
-    application.add_handler(CommandHandler("targets", list_targets))
-    application.add_handler(CallbackQueryHandler(button))
-    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
+    handlers = [
+        CommandHandler('start', start),
+        CommandHandler('mode', change_mode),
+        CommandHandler('addtarget', add_target),
+        CommandHandler('targets', list_targets),
+        CallbackQueryHandler(button_handler),
+        MessageHandler(filters.ALL & ~filters.COMMAND, handle_message)
+    ]
     
-    # Start the Bot
+    for handler in handlers:
+        application.add_handler(handler)
+    
+    # Start bot
     application.run_polling()
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.INFO
+    )
     main()
