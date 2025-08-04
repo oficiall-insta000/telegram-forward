@@ -1,12 +1,10 @@
 from keep_alive import keep_alive
-from bot import run_bot
+from bot import main
 import asyncio
 
 if __name__ == "__main__":
     keep_alive()
     try:
-        asyncio.run(run_bot())
-    except KeyboardInterrupt:
-        print("Bot stopped by user")
+        main()
     except Exception as e:
         print(f"Fatal error: {e}")
