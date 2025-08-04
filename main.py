@@ -253,8 +253,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(
                 chat_id=ADMIN_ID,
                 text=f"{message.text}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
-                reply_markup=reply_markup
-            ) الكود الخاص بالوضع اليدوي يذهب هنا
+                reply_markup=reply_markup)
+            
               pass
             
     except Exception as e:
