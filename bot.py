@@ -3,11 +3,10 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
-    ApplicationBuilder,
-    ContextTypes,
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
+    ContextTypes,
     filters,
 )
 from target_manager import add_target, get_all_targets
@@ -15,22 +14,27 @@ from target_manager import add_target, get_all_targets
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = os.getenv("ADMIN_ID")
 
-# الإعدادات
-ADMIN_ONLY = True
-AUTO_SEND = False
-
-# إعدادات السجلات
-logging.basicConfig(level=logging.INFO)
+# Logging configuration
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
-# أوامر
+# Global variables
+AUTO_SEND = False
+
+async def is_admin(update: Update) -> bool:
+    """Check if the user is admin"""
+    return str(update.effective_user.id) == ADMIN_ID
 
 async def add_target_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not await is_admin(update):
+        await update.message.reply_text("❌ ليس لديك صلاحية تنفيذ هذا الأمر.")
         return
 
     if not context.args:
-        await update.message.reply_text("❌ يجب تحديد آي دي الجروب أو القناة.")
+        await update.message.reply_text("❌ يجب تحديد آي دي الجروب أو القناة.\nاستخدم: /addtarget <chat_id>")
         return
 
     try:
@@ -41,10 +45,11 @@ async def add_target_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         else:
             await update.message.reply_text(f"ℹ️ الهدف موجود مسبقًا.")
     except ValueError:
-        await update.message.reply_text("❌ آي دي غير صالح.")
+        await update.message.reply_text("❌ آي دي غير صالح. يجب أن يكون رقمًا.")
 
 async def mode_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not await is_admin(update):
+        await update.message.reply_text("❌ ليس لديك صلاحية تنفيذ هذا الأمر.")
         return
 
     global AUTO_SEND
@@ -53,7 +58,7 @@ async def mode_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🔁 وضع الإرسال الحالي: {status}")
 
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not await is_admin(update):
         return
 
     query = update.callback_query
@@ -62,6 +67,9 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "send_now":
         if "last_message" in context.user_data:
             msg = context.user_data["last_message"]
+            success = 0
+            failures = 0
+            
             for target_id in get_all_targets():
                 try:
                     await context.bot.copy_message(
@@ -69,19 +77,33 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         from_chat_id=msg.chat_id,
                         message_id=msg.message_id,
                     )
+                    success += 1
                 except Exception as e:
                     logger.error(f"❌ فشل الإرسال إلى {target_id}: {e}")
-            await query.edit_message_text("✅ تم الإرسال بنجاح.")
+                    failures += 1
+            
+            await query.edit_message_text(
+                f"✅ تم الإرسال بنجاح إلى {success} هدف.\n"
+                f"❌ فشل الإرسال إلى {failures} هدف."
+            )
         else:
             await query.edit_message_text("❌ لا يوجد رسالة محفوظة.")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not await is_admin(update):
         return
 
+    # Skip non-message updates
+    if not update.message:
+        return
+
+    # Save the message
     context.user_data["last_message"] = update.message
 
     if AUTO_SEND:
+        success = 0
+        failures = 0
+        
         for target_id in get_all_targets():
             try:
                 await context.bot.copy_message(
@@ -89,21 +111,57 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     from_chat_id=update.message.chat_id,
                     message_id=update.message.message_id,
                 )
+                success += 1
             except Exception as e:
                 logger.error(f"❌ فشل الإرسال إلى {target_id}: {e}")
+                failures += 1
+        
+        await update.message.reply_text(
+            f"📤 تم الإرسال التلقائي إلى {success} هدف.\n"
+            f"❌ فشل الإرسال إلى {failures} هدف."
+        )
     else:
         keyboard = [[InlineKeyboardButton("📤 إرسال", callback_data="send_now")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("📝 هل تريد إرسال هذه الرسالة؟", reply_markup=reply_markup)
+        await update.message.reply_text(
+            "📝 هل تريد إرسال هذه الرسالة؟",
+            reply_markup=reply_markup
+        )
 
-# تشغيل البوت
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logger.error(f"حدث خطأ: {context.error}")
+    if update and hasattr(update, 'message'):
+        await update.message.reply_text("❌ حدث خطأ أثناء معالجة طلبك.")
+
 async def run_bot():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    try:
+        if not BOT_TOKEN or not ADMIN_ID:
+            raise ValueError("BOT_TOKEN and ADMIN_ID must be set in environment variables")
 
-    app.add_handler(CommandHandler("addtarget", add_target_command))
-    app.add_handler(CommandHandler("mode", mode_command))
-    app.add_handler(CallbackQueryHandler(handle_buttons))
-    app.add_handler(MessageHandler(filters.ALL, handle_message))
+        app = Application.builder().token(BOT_TOKEN).build()
 
-    logger.info("🤖 Bot is running...")
-    await app.run_polling(close_loop=False)
+        # Add handlers
+        app.add_handler(CommandHandler("addtarget", add_target_command))
+        app.add_handler(CommandHandler("mode", mode_command))
+        app.add_handler(CallbackQueryHandler(handle_buttons))
+        app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
+        
+        # Add error handler
+        app.add_error_handler(error_handler)
+
+        logger.info("🤖 Bot is starting...")
+        await app.initialize()
+        await app.start()
+        logger.info("🤖 Bot is now running!")
+        
+        # Keep the application running
+        while True:
+            await asyncio.sleep(3600)  # Sleep for 1 hour
+            
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+    finally:
+        if 'app' in locals():
+            logger.info("🤖 Bot is shutting down...")
+            await app.stop()
+            await app.shutdown()
