@@ -170,26 +170,95 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     
     try:
-        if data['mode'] == 'auto':
-            # معالجة الوسائط المتعددة
-            if message.media_group_id:
-                media_group = await message.get_media_group()
-                await send_to_targets(context.application, message.caption, media_group=media_group)
-            elif message.photo:
-                await send_to_targets(context.application, message.caption, chat_id=message.chat_id, message=message)
-            elif message.video:
-                await send_to_targets(context.application, message.caption, chat_id=message.chat_id, message=message)
-            elif message.document:
-                await send_to_targets(context.application, message.caption, chat_id=message.chat_id, message=message)
-            elif message.audio:
-                await send_to_targets(context.application, message.caption, chat_id=message.chat_id, message=message)
-            elif message.text:
-                await send_to_targets(context.application, message.text)
-        else:
-            # الكود الخاص بالوضع اليدوي...
+      if data['mode'] == 'auto':
+          if message.media_group_id:
+              media_group = await message.get_media_group()
+              await send_to_targets(context.application, message.caption, media_group=media_group)
+          elif message.photo:
+              await send_to_targets(context.application, message.caption, chat_id=message.chat_id, message=message)
+          elif message.video:
+              await send_to_targets(context.application, message.caption, chat_id=message.chat_id, message=message)
+          elif message.document:
+              await send_to_targets(context.application, message.caption, chat_id=message.chat_id, message=message)
+          elif message.audio:
+              await send_to_targets(context.application, message.caption, chat_id=message.chat_id, message=message)
+          elif message.text:
+              await send_to_targets(context.application, message.text)
+      else:
+        # الوضع اليدوي - عرض زر التأكيد
+        keyboard = [[InlineKeyboardButton("📤 إرسال", callback_data='send_message')]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # حفظ الرسالة مؤقتاً للإرسال لاحقاً
+        context.user_data['pending_message'] = {
+            'chat_id': message.chat_id,
+            'message': message
+        }
+        
+        # معالجة أنواع الوسائط المختلفة
+        if message.media_group_id:
+            media_group = await message.get_media_group()
+            context.user_data['pending_message']['media_group'] = media_group
+            context.user_data['pending_message']['message'] = message.caption
+            
+            # عرض معاينة للوسائط المتعددة
+            first_media = media_group[0]
+            if first_media.photo:
+                await context.bot.send_photo(
+                    chat_id=ADMIN_ID,
+                    photo=first_media.photo[-1].file_id,
+                    caption=f"{message.caption}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
+                    reply_markup=reply_markup
+                )
+            elif first_media.video:
+                await context.bot.send_video(
+                    chat_id=ADMIN_ID,
+                    video=first_media.video.file_id,
+                    caption=f"{message.caption}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
+                    reply_markup=reply_markup
+                )
+            elif first_media.document:
+                await context.bot.send_document(
+                    chat_id=ADMIN_ID,
+                    document=first_media.document.file_id,
+                    caption=f"{message.caption}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
+                    reply_markup=reply_markup
+                )
+        
+        elif message.photo:
+            await context.bot.send_photo(
+                chat_id=ADMIN_ID,
+                photo=message.photo[-1].file_id,
+                caption=f"{message.caption}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
+                reply_markup=reply_markup
+            )
+        
+        elif message.video:
+            await context.bot.send_video(
+                chat_id=ADMIN_ID,
+                video=message.video.file_id,
+                caption=f"{message.caption}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
+                reply_markup=reply_markup
+            )
+        
+        elif message.document:
+            await context.bot.send_document(
+                chat_id=ADMIN_ID,
+                document=message.document.file_id,
+                caption=f"{message.caption}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
+                reply_markup=reply_markup
+            )
+        
+        elif message.text:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"{message.text}\n\nالرسالة جاهزة للإرسال إلى {len(data['targets'])} هدف",
+                reply_markup=reply_markup
+            ) الكود الخاص بالوضع اليدوي يذهب هنا
+              pass
+            
     except Exception as e:
         print(f"Error handling message: {e}")
-
 app = Flask(__name__)
 
 @app.route('/')
@@ -198,11 +267,14 @@ def home():
 
 def ping():
     while True:
-        requests.get("https://telegram-forward-wa4p.onrender.com")
-        time.sleep(300)  # Ping كل 5 دقائق
+        try:
+            requests.get("https://telegram-forward-wa4p.onrender.com")
+            time.sleep(300)  # كل 5 دقائق
+        except Exception as e:
+            print(f"Ping error: {e}")
 
+# بدء الخيط في الخلفية
 Thread(target=ping).start()
-
 def main():
     # Initialize data file if not exists
     load_data()
