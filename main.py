@@ -1,4 +1,6 @@
 import os
+from aiohttp import web
+import threading
 import json
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -26,7 +28,16 @@ if not os.path.exists(CONFIG_FILE):
 def load_config():
     with open(CONFIG_FILE) as f:
         return json.load(f)
+async def handle_health_check(request):
+    return web.Response(text="Bot is alive!")
 
+def run_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle_health_check)
+    web.run_app(app, port=8080)
+
+# ---- Add this inside `main()` before `application.run_polling()` ----
+threading.Thread(target=run_web_server, daemon=True).start()
 def save_config(config):
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=4)
