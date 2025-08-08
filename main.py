@@ -21,7 +21,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Bot configuration
+# Configuration
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "7517757393:AAGzb34ezDqZUuUO2mZeMSJfsOAbXr70Oa4")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "5081207021"))
 CONFIG_FILE = "config.json"
@@ -51,10 +51,10 @@ class KeepAlive:
         if self.runner:
             await self.runner.cleanup()
 
-# Initialize config file if not exists
+# Initialize config
 if not os.path.exists(CONFIG_FILE):
     with open(CONFIG_FILE, "w") as f:
-        json.dump({"mode": "auto", "targets": [], "pending_message": None}, f)
+        json.dump({"mode": "auto", "targets": []}, f)
 
 def load_config():
     with open(CONFIG_FILE) as f:
@@ -64,6 +64,7 @@ def save_config(config):
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=4)
 
+# Bot command handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -139,13 +140,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if config["mode"] == "auto":
         await forward_to_targets(update, context)
     else:
-        config["pending_message"] = {
-            "message_id": update.message.message_id,
-            "chat_id": update.message.chat_id,
-            "content_type": update.message.content_type,
-        }
-        save_config(config)
-        
         keyboard = []
         for target in config["targets"]:
             keyboard.append([InlineKeyboardButton(f"إرسال إلى {target}", callback_data=f"send_to_{target}")])
@@ -216,42 +210,59 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"تم إرسال الرسالة إلى {target}")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.error("Exception while handling an update:", exc_info=context.error)
-    if isinstance(context.error, Conflict):
-        logger.warning("Another instance is running. Shutting down...")
-        await context.application.stop()
+    error = context.error
+    logger.error(msg="Exception while handling an update:", exc_info=error)
+    
+    if isinstance(error, Conflict):
+        logger.warning("Conflict detected - another instance may be running")
+        # Don't exit, just wait and try again
+        await asyncio.sleep(5)
+    else:
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"حدث خطأ: {str(error)}"
+        )
 
 async def main():
+    # Initialize keep-alive server
     keep_alive = KeepAlive(port=PORT)
     await keep_alive.start()
     
-    application = Application.builder().token(TOKEN).build()
-    application.add_error_handler(error_handler)
-    
-    # Register handlers
-    handlers = [
-        CommandHandler("start", start),
-        CommandHandler("mode", change_mode),
-        CommandHandler("add_target", add_target),
-        CommandHandler("remove_target", remove_target),
-        CommandHandler("list_targets", list_targets),
-        MessageHandler(filters.ALL & ~filters.COMMAND, handle_message),
-        CallbackQueryHandler(button_callback)
-    ]
-    
-    for handler in handlers:
-        application.add_handler(handler)
-    
     try:
-        await application.initialize()
-        await application.start()
-        await application.updater.start_polling()
-        logger.info("Bot started successfully")
+        # Create application
+        application = Application.builder().token(TOKEN).build()
         
-        # Keep the application running
+        # Register handlers
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("mode", change_mode))
+        application.add_handler(CommandHandler("add_target", add_target))
+        application.add_handler(CommandHandler("remove_target", remove_target))
+        application.add_handler(CommandHandler("list_targets", list_targets))
+        application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
+        application.add_handler(CallbackQueryHandler(button_callback))
+        application.add_error_handler(error_handler)
+        
+        # Start polling with error recovery
         while True:
-            await asyncio.sleep(3600)
-            
+            try:
+                logger.info("Starting bot...")
+                await application.initialize()
+                await application.start()
+                await application.updater.start_polling()
+                
+                # Keep the bot running
+                while True:
+                    await asyncio.sleep(3600)
+                    
+            except Conflict as e:
+                logger.warning(f"Conflict error: {e}. Restarting in 5 seconds...")
+                await asyncio.sleep(5)
+                continue
+            except Exception as e:
+                logger.error(f"Unexpected error: {e}. Restarting in 10 seconds...")
+                await asyncio.sleep(10)
+                continue
+                
     except asyncio.CancelledError:
         pass
     except Exception as e:
@@ -259,9 +270,7 @@ async def main():
     finally:
         logger.info("Shutting down...")
         await keep_alive.stop()
-        if application.updater:
-            await application.updater.stop()
-        if application:
+        if 'application' in locals():
             await application.stop()
         logger.info("Bot stopped")
 
